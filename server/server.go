@@ -76,6 +76,29 @@ func New(log logr.Logger, db bolted.Database) (*Server, error) {
 
 	})
 
+	r.Methods("GET").Path("/events").HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		log := log.WithValues("method", r.Method, "path", r.URL.Path)
+		events := []event{}
+		maxSize := 100
+		err := bolted.SugaredRead(db, func(tx bolted.SugaredReadTx) error {
+			for it := tx.Iterator(eventsPath); !it.IsDone() && len(events) < maxSize; it.Next() {
+				events = append(events, event{it.GetKey(), it.GetValue()})
+
+			}
+			return nil
+		})
+
+		if err != nil {
+			log.Error(err, "could not read events: %w", err)
+			http.Error(w, fmt.Errorf("could not read events: %w", err).Error(), http.StatusInternalServerError)
+			return
+		}
+
+		w.Header().Set("content-type", "application/json")
+		json.NewEncoder(w).Encode(events)
+
+	})
+
 	return &Server{
 		Handler: r,
 		db:      db,
