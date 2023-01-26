@@ -140,7 +140,3 @@ func New(log logr.Logger, db bolted.Database) (*Server, error) {
 		log:     log,
 	}, nil
 }
-
-func (s *Server) Close() error {
-	return nil
-}

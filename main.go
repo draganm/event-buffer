@@ -11,6 +11,8 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/draganm/bolted/embedded"
+	"github.com/draganm/event-buffer/server"
 	"github.com/go-logr/zapr"
 	"github.com/urfave/cli/v2"
 	"go.uber.org/zap"
@@ -42,11 +44,23 @@ func main() {
 				Value:   ":5566",
 				EnvVars: []string{"ADDR"},
 			},
+			&cli.StringFlag{
+				Name:    "state-file",
+				Value:   "state",
+				EnvVars: []string{"STATE_FILE"},
+			},
 		},
 		Action: func(c *cli.Context) error {
 			log := zapr.NewLogger(logger)
 			defer log.Info("server exiting")
 			eg, ctx := errgroup.WithContext(context.Background())
+
+			db, err := embedded.Open(c.String("state-file"), 0700, embedded.Options{})
+			if err != nil {
+				return fmt.Errorf("could not open state: %w", err)
+			}
+
+			srv, err := server.New(log, db)
 
 			eg.Go(func() error {
 				sigChan := make(chan os.Signal)
@@ -67,7 +81,9 @@ func main() {
 
 				}
 
-				s := &http.Server{}
+				s := &http.Server{
+					Handler: srv,
+				}
 
 				go func() {
 					<-ctx.Done()
@@ -76,9 +92,10 @@ func main() {
 					log.Info("graceful shutdown of the server")
 					err := s.Shutdown(shutdownContext)
 					if errors.Is(err, context.DeadlineExceeded) {
-						log.Info("server did not shut down gracefully, forcing close")
+						log.Info("http server did not shut down gracefully, forcing close")
 						s.Close()
 					}
+
 				}()
 
 				log.Info("server started", "addr", l.Addr().String())
