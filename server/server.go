@@ -76,7 +76,7 @@ func New(log logr.Logger, db bolted.Database) (*Server, error) {
 			return
 		}
 
-		w.WriteHeader(http.StatusNoContent)
+		w.WriteHeader(http.StatusOK)
 
 	})
 	const maxLimit = 1000
