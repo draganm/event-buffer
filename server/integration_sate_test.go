@@ -8,6 +8,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"strconv"
 )
 
 type StateKeyType string
@@ -20,9 +21,11 @@ type eventsOrError struct {
 }
 
 type State struct {
-	serverBaseURL  string
-	pollResult     []string
-	longPollResult chan eventsOrError
+	serverBaseURL    string
+	pollResult       []string
+	secondPollResult []string
+	longPollResult   chan eventsOrError
+	lastId           string
 }
 
 func (s *State) sendEvents(ctx context.Context, events []any) error {
@@ -87,33 +90,39 @@ func (e *event) UnmarshalJSON(p []byte) error {
 	return nil
 }
 
-func (s *State) pollForEvents(ctx context.Context, evts any) error {
-	u, err := url.JoinPath(s.serverBaseURL, "events")
+func (s *State) pollForEvents(ctx context.Context, evts any, lastID string, limit int) (string, error) {
+
+	u, err := url.Parse(s.serverBaseURL)
 	if err != nil {
-		return fmt.Errorf("could not join url path: %w", err)
+		return "", fmt.Errorf("could not parse url: %w", err)
 	}
 
-	req, err := http.NewRequestWithContext(ctx, "GET", u, nil)
+	u = u.JoinPath("events")
+	q := u.Query()
+	q.Set("limit", strconv.FormatInt(int64(limit), 10))
+	q.Set("after", lastID)
+	u.RawQuery = q.Encode()
+	req, err := http.NewRequestWithContext(ctx, "GET", u.String(), nil)
 	if err != nil {
-		return fmt.Errorf("could not create request: %w", err)
+		return "", fmt.Errorf("could not create request: %w", err)
 	}
 
 	res, err := http.DefaultClient.Do(req)
 	if err != nil {
-		return fmt.Errorf("could not perform request: %w", err)
+		return "", fmt.Errorf("could not perform request: %w", err)
 	}
 
 	defer res.Body.Close()
 
 	if res.StatusCode != http.StatusOK {
 		rd, _ := io.ReadAll(res.Body)
-		return fmt.Errorf("unexpected status %s: %s", res.Status, string(rd))
+		return "", fmt.Errorf("unexpected status %s: %s", res.Status, string(rd))
 	}
 
 	resp := []event{}
 	err = json.NewDecoder(res.Body).Decode(&resp)
 	if err != nil {
-		return fmt.Errorf("could not decode response: %w", err)
+		return "", fmt.Errorf("could not decode response: %w", err)
 	}
 
 	payloads := make([]json.RawMessage, len(resp))
@@ -124,15 +133,19 @@ func (s *State) pollForEvents(ctx context.Context, evts any) error {
 
 	d, err := json.Marshal(payloads)
 	if err != nil {
-		return fmt.Errorf("could not marshal payloads: %w", err)
+		return "", fmt.Errorf("could not marshal payloads: %w", err)
 	}
 
 	err = json.Unmarshal(d, evts)
 
 	if err != nil {
-		return fmt.Errorf("could not unmarshal events: %w", err)
+		return "", fmt.Errorf("could not unmarshal events: %w", err)
 	}
 
-	return nil
+	if len(resp) > 0 {
+		return resp[len(resp)-1].ID, nil
+	}
+
+	return "", nil
 
 }

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"strconv"
 	"time"
 
 	"github.com/draganm/bolted"
@@ -77,14 +78,35 @@ func New(log logr.Logger, db bolted.Database) (*Server, error) {
 		w.WriteHeader(http.StatusNoContent)
 
 	})
+	const maxLimit = 1000
 
 	r.Methods("GET").Path("/events").HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		log := log.WithValues("method", r.Method, "path", r.URL.Path)
 
+		q := r.URL.Query()
+
+		after := q.Get("after")
+
+		limit := 100
+		limitString := q.Get("limit")
+		if limitString != "" {
+			limit64, err := strconv.ParseInt(limitString, 10, 64)
+			if err != nil {
+				log.Error(err, "could not parse limit", "limit", limitString)
+				http.Error(w, fmt.Errorf("could not parse limit: %w", err).Error(), http.StatusBadRequest)
+				return
+			}
+			if limit64 > maxLimit {
+				log.Error(err, "too large limit requested", "limit", limit64)
+				http.Error(w, fmt.Errorf("requested limit %d is larger than allowed %d", limit64, maxLimit).Error(), http.StatusBadRequest)
+				return
+			}
+			limit = int(limit64)
+		}
+
 		changes, done := db.Observe(eventsPath.ToMatcher().AppendAnyElementMatcher())
 		defer done()
 		events := []event{}
-		maxSize := 100
 
 		timeout := time.Second * 20
 
@@ -100,7 +122,16 @@ func New(log logr.Logger, db bolted.Database) (*Server, error) {
 			}
 
 			err := bolted.SugaredRead(db, func(tx bolted.SugaredReadTx) error {
-				for it := tx.Iterator(eventsPath); !it.IsDone() && len(events) < maxSize; it.Next() {
+				it := tx.Iterator(eventsPath)
+				if after != "" {
+					it.Seek(after)
+					if !it.IsDone() {
+						if it.GetKey() == after {
+							it.Next()
+						}
+					}
+				}
+				for ; !it.IsDone() && len(events) < limit; it.Next() {
 					events = append(events, event{it.GetKey(), it.GetValue()})
 				}
 				return nil

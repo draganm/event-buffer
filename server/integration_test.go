@@ -87,6 +87,10 @@ func InitializeScenario(ctx *godog.ScenarioContext) {
 	ctx.Step(`^I start polling for the events$`, iStartPollingForTheEvents)
 	ctx.Step(`^no events in the buffer$`, noEventsInTheBuffer)
 	ctx.Step(`^there is a new event sent to the buffer$`, thereIsANewEventSentToTheBuffer)
+	ctx.Step(`^I poll for one event$`, iPollForOneEvent)
+	ctx.Step(`^I poll for other event after the previous event$`, iPollForOtherEventAfterThePreviousEvent)
+	ctx.Step(`^I should get one event for each poll$`, iShouldGetOneEventForEachPoll)
+	ctx.Step(`^two events in the buffer$`, twoEventsInTheBuffer)
 
 }
 
@@ -120,7 +124,7 @@ func oneEventInTheBuffer(ctx context.Context) error {
 func iPollForTheEvents(ctx context.Context) error {
 	s := getState(ctx)
 	evts := []string{}
-	err := s.pollForEvents(ctx, &evts)
+	_, err := s.pollForEvents(ctx, &evts, "", 100)
 	if err != nil {
 		return fmt.Errorf("failed polling for events: %w", err)
 	}
@@ -147,7 +151,7 @@ func iStartPollingForTheEvents(ctx context.Context) error {
 	s.longPollResult = make(chan eventsOrError, 1)
 	go func() {
 		evts := []string{}
-		err := s.pollForEvents(ctx, &evts)
+		_, err := s.pollForEvents(ctx, &evts, "", 100)
 		if err != nil {
 			s.longPollResult <- eventsOrError{err: fmt.Errorf("failed polling for events: %w", err)}
 			return
@@ -183,5 +187,50 @@ func iShouldReceiveTheNewEvent(ctx context.Context) error {
 		}
 	}
 
+	return nil
+}
+
+func twoEventsInTheBuffer(ctx context.Context) error {
+	s := getState(ctx)
+	err := s.sendEvents(ctx, []any{"evt1", "evt2"})
+	if err != nil {
+		return err
+	}
+	return nil
+}
+
+func iPollForOneEvent(ctx context.Context) error {
+	s := getState(ctx)
+	evts := []string{}
+	lastId, err := s.pollForEvents(ctx, &evts, "", 1)
+	if err != nil {
+		return fmt.Errorf("failed polling for events: %w", err)
+	}
+	s.pollResult = evts
+	s.lastId = lastId
+	return nil
+}
+
+func iPollForOtherEventAfterThePreviousEvent(ctx context.Context) error {
+	s := getState(ctx)
+	evts := []string{}
+	_, err := s.pollForEvents(ctx, &evts, s.lastId, 1)
+	if err != nil {
+		return fmt.Errorf("failed polling for events: %w", err)
+	}
+	s.secondPollResult = evts
+	return nil
+}
+
+func iShouldGetOneEventForEachPoll(ctx context.Context) error {
+	s := getState(ctx)
+	d := cmp.Diff(s.pollResult, []string{"evt1"})
+	if d != "" {
+		return fmt.Errorf("unexpected poll result:\n%s", d)
+	}
+	d = cmp.Diff(s.secondPollResult, []string{"evt2"})
+	if d != "" {
+		return fmt.Errorf("unexpected second poll result:\n%s", d)
+	}
 	return nil
 }
