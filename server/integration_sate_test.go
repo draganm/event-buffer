@@ -53,7 +53,7 @@ func (s *State) sendEvents(ctx context.Context, events []any) error {
 
 	defer res.Body.Close()
 
-	if res.StatusCode != http.StatusNoContent {
+	if res.StatusCode != http.StatusOK {
 		rd, _ := io.ReadAll(res.Body)
 		return fmt.Errorf("unexpected status %s: %s", res.Status, string(rd))
 	}
