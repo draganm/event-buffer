@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"runtime"
 	"testing"
 
 	"github.com/cucumber/godog"
@@ -29,6 +30,7 @@ var opts = godog.Options{
 	Format:        "progress",
 	Paths:         []string{"features"},
 	NoColors:      true,
+	Concurrency:   runtime.NumCPU(),
 }
 
 func init() {

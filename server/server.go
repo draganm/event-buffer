@@ -13,6 +13,7 @@ import (
 	"github.com/go-logr/logr"
 	"github.com/gofrs/uuid"
 	"github.com/gorilla/mux"
+	"github.com/prometheus/client_golang/prometheus"
 )
 
 type Server struct {
@@ -164,6 +165,8 @@ func New(log logr.Logger, db bolted.Database) (*Server, error) {
 		json.NewEncoder(w).Encode(events)
 
 	})
+
+	prometheus.Register(newStatsCollector(db, log))
 
 	return &Server{
 		Handler: r,

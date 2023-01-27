@@ -14,6 +14,8 @@ import (
 	"github.com/draganm/bolted/embedded"
 	"github.com/draganm/event-buffer/server"
 	"github.com/go-logr/zapr"
+	"github.com/gorilla/mux"
+	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"github.com/urfave/cli/v2"
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
@@ -43,6 +45,11 @@ func main() {
 				Name:    "addr",
 				Value:   ":5566",
 				EnvVars: []string{"ADDR"},
+			},
+			&cli.StringFlag{
+				Name:    "metrics-addr",
+				Value:   ":3000",
+				EnvVars: []string{"METRICS_ADDR"},
 			},
 			&cli.StringFlag{
 				Name:    "state-file",
@@ -108,6 +115,36 @@ func main() {
 				}()
 
 				log.Info("server started", "addr", l.Addr().String())
+				return s.Serve(l)
+			})
+
+			eg.Go(func() error {
+				l, err := net.Listen("tcp", c.String("metrics-addr"))
+				if err != nil {
+					return fmt.Errorf("could not listen for metric requests: %w", err)
+
+				}
+
+				r := mux.NewRouter()
+				r.Methods("GET").Path("/metrics").Handler(promhttp.Handler())
+
+				s := &http.Server{
+					Handler: r,
+				}
+
+				go func() {
+					<-ctx.Done()
+					shutdownContext, cancel := context.WithTimeout(context.Background(), time.Second)
+					defer cancel()
+					log.Info("graceful shutdown of the metrics server")
+					err := s.Shutdown(shutdownContext)
+					if errors.Is(err, context.DeadlineExceeded) {
+						log.Info("metrics server did not shut down gracefully, forcing close")
+						s.Close()
+					}
+				}()
+
+				log.Info("metrics server started", "addr", l.Addr().String())
 				return s.Serve(l)
 			})
 
