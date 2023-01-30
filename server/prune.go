@@ -17,8 +17,7 @@ func (s Server) Prune(cutoffTime time.Time) (err error) {
 			}
 		}()
 		it := tx.Iterator(eventsPath)
-		it.Last()
-		for ; !it.IsDone(); it.Prev() {
+		for ; !it.IsDone(); it.Next() {
 			id, err := uuid.FromString(it.GetKey())
 			if err != nil {
 				return fmt.Errorf("could not parse uuid %s: %w", it.GetKey(), err)
