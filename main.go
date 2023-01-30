@@ -78,6 +78,14 @@ func main() {
 			}
 
 			srv, err := server.New(log, db)
+			if err != nil {
+				return fmt.Errorf("could not start server: %w", err)
+			}
+
+			err = srv.Prune(time.Now().Add(-c.Duration("retention-period")))
+			if err != nil {
+				return fmt.Errorf("could not prune stale events: %w", err)
+			}
 
 			eg.Go(func() error {
 				sigChan := make(chan os.Signal)
