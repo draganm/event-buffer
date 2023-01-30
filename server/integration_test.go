@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/cucumber/godog"
+	"github.com/draganm/event-buffer/client"
 	"github.com/draganm/event-buffer/server/testrig"
 	"github.com/go-logr/logr"
 	"github.com/go-logr/zapr"
@@ -73,7 +74,13 @@ func InitializeScenario(ctx *godog.ScenarioContext) {
 		if err != nil {
 			return ctx, fmt.Errorf("could not start server: %w", err)
 		}
-		state.serverBaseURL = serverURL
+
+		cl, err := client.New(serverURL)
+		if err != nil {
+			return ctx, fmt.Errorf("could not create client: %w", err)
+		}
+
+		state.client = cl
 
 		ctx = context.WithValue(ctx, stateKey, state)
 
@@ -102,7 +109,7 @@ func getState(ctx context.Context) *State {
 
 func iSendASingleEvent(ctx context.Context) error {
 	s := getState(ctx)
-	err := s.sendEvents(ctx, []any{"evt1"})
+	err := s.client.SendEvents(ctx, []any{"evt1"})
 	if err != nil {
 		return err
 	}
@@ -116,7 +123,7 @@ func iShouldGetAConfirmation() error {
 
 func oneEventInTheBuffer(ctx context.Context) error {
 	s := getState(ctx)
-	err := s.sendEvents(ctx, []any{"evt1"})
+	err := s.client.SendEvents(ctx, []any{"evt1"})
 	if err != nil {
 		return err
 	}
@@ -126,7 +133,7 @@ func oneEventInTheBuffer(ctx context.Context) error {
 func iPollForTheEvents(ctx context.Context) error {
 	s := getState(ctx)
 	evts := []string{}
-	_, err := s.pollForEvents(ctx, &evts, "", 100)
+	_, err := s.client.PollForEvents(ctx, "", 100, &evts)
 	if err != nil {
 		return fmt.Errorf("failed polling for events: %w", err)
 	}
@@ -153,7 +160,7 @@ func iStartPollingForTheEvents(ctx context.Context) error {
 	s.longPollResult = make(chan eventsOrError, 1)
 	go func() {
 		evts := []string{}
-		_, err := s.pollForEvents(ctx, &evts, "", 100)
+		_, err := s.client.PollForEvents(ctx, "", 100, &evts)
 		if err != nil {
 			s.longPollResult <- eventsOrError{err: fmt.Errorf("failed polling for events: %w", err)}
 			return
@@ -166,7 +173,7 @@ func iStartPollingForTheEvents(ctx context.Context) error {
 
 func thereIsANewEventSentToTheBuffer(ctx context.Context) error {
 	s := getState(ctx)
-	err := s.sendEvents(ctx, []any{"evt1"})
+	err := s.client.SendEvents(ctx, []any{"evt1"})
 	if err != nil {
 		return err
 	}
@@ -194,7 +201,7 @@ func iShouldReceiveTheNewEvent(ctx context.Context) error {
 
 func twoEventsInTheBuffer(ctx context.Context) error {
 	s := getState(ctx)
-	err := s.sendEvents(ctx, []any{"evt1", "evt2"})
+	err := s.client.SendEvents(ctx, []any{"evt1", "evt2"})
 	if err != nil {
 		return err
 	}
@@ -204,19 +211,24 @@ func twoEventsInTheBuffer(ctx context.Context) error {
 func iPollForOneEvent(ctx context.Context) error {
 	s := getState(ctx)
 	evts := []string{}
-	lastId, err := s.pollForEvents(ctx, &evts, "", 1)
+	ids, err := s.client.PollForEvents(ctx, "", 1, &evts)
 	if err != nil {
 		return fmt.Errorf("failed polling for events: %w", err)
 	}
+
+	if len(ids) != 1 {
+		return fmt.Errorf("expected 1 event, got %d", len(ids))
+	}
+
 	s.pollResult = evts
-	s.lastId = lastId
+	s.lastId = ids[len(ids)-1]
 	return nil
 }
 
 func iPollForOtherEventAfterThePreviousEvent(ctx context.Context) error {
 	s := getState(ctx)
 	evts := []string{}
-	_, err := s.pollForEvents(ctx, &evts, s.lastId, 1)
+	_, err := s.client.PollForEvents(ctx, s.lastId, 1, &evts)
 	if err != nil {
 		return fmt.Errorf("failed polling for events: %w", err)
 	}
