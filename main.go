@@ -11,8 +11,10 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/draganm/bolted"
 	"github.com/draganm/bolted/embedded"
 	"github.com/draganm/event-buffer/server"
+	"github.com/go-logr/logr"
 	"github.com/go-logr/zapr"
 	"github.com/gorilla/mux"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
@@ -52,6 +54,11 @@ func main() {
 				EnvVars: []string{"METRICS_ADDR"},
 			},
 			&cli.StringFlag{
+				Name:    "internal-addr",
+				Value:   ":5000",
+				EnvVars: []string{"INTERNAL_ADDR"},
+			},
+			&cli.StringFlag{
 				Name:    "state-file",
 				Value:   "state",
 				EnvVars: []string{"STATE_FILE"},
@@ -78,9 +85,17 @@ func main() {
 			}
 
 			srv, err := server.New(log, db)
+			if err != nil {
+				return fmt.Errorf("could not start server: %w", err)
+			}
+
+			err = srv.Prune(time.Now().Add(-c.Duration("retention-period")))
+			if err != nil {
+				return fmt.Errorf("could not prune stale events: %w", err)
+			}
 
 			eg.Go(func() error {
-				sigChan := make(chan os.Signal)
+				sigChan := make(chan os.Signal, 1)
 				signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
 				select {
 				case sig := <-sigChan:
@@ -91,65 +106,33 @@ func main() {
 				}
 			})
 
-			eg.Go(func() error {
-				l, err := net.Listen("tcp", c.String("addr"))
+			// run API server
+
+			eg.Go(runHttp(ctx, log, c.String("addr"), "api", srv))
+
+			// run metrics server
+			metricsRouter := mux.NewRouter()
+			metricsRouter.Methods("GET").Path("/metrics").Handler(promhttp.Handler())
+			eg.Go(runHttp(ctx, log, c.String("metrics-addr"), "metrics", metricsRouter))
+
+			// run internal api
+			internalRouter := mux.NewRouter()
+			internalRouter.Methods("GET").Path("/dump").HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.Header().Set("content-type", "application/binary")
+				err := bolted.SugaredRead(db, func(tx bolted.SugaredReadTx) error {
+					tx.Dump(w)
+					return nil
+				})
 				if err != nil {
-					return fmt.Errorf("could not listen: %w", err)
-
+					http.Error(w, fmt.Errorf("could not write dump: %w", err).Error(), http.StatusInternalServerError)
+					return
 				}
-
-				s := &http.Server{
-					Handler: srv,
-				}
-
-				go func() {
-					<-ctx.Done()
-					shutdownContext, cancel := context.WithTimeout(context.Background(), time.Second)
-					defer cancel()
-					log.Info("graceful shutdown of the server")
-					err := s.Shutdown(shutdownContext)
-					if errors.Is(err, context.DeadlineExceeded) {
-						log.Info("http server did not shut down gracefully, forcing close")
-						s.Close()
-					}
-				}()
-
-				log.Info("server started", "addr", l.Addr().String())
-				return s.Serve(l)
 			})
 
+			eg.Go(runHttp(ctx, log, c.String("internal-addr"), "internal", internalRouter))
+
+			// run the pruner
 			eg.Go(func() error {
-				l, err := net.Listen("tcp", c.String("metrics-addr"))
-				if err != nil {
-					return fmt.Errorf("could not listen for metric requests: %w", err)
-
-				}
-
-				r := mux.NewRouter()
-				r.Methods("GET").Path("/metrics").Handler(promhttp.Handler())
-
-				s := &http.Server{
-					Handler: r,
-				}
-
-				go func() {
-					<-ctx.Done()
-					shutdownContext, cancel := context.WithTimeout(context.Background(), time.Second)
-					defer cancel()
-					log.Info("graceful shutdown of the metrics server")
-					err := s.Shutdown(shutdownContext)
-					if errors.Is(err, context.DeadlineExceeded) {
-						log.Info("metrics server did not shut down gracefully, forcing close")
-						s.Close()
-					}
-				}()
-
-				log.Info("metrics server started", "addr", l.Addr().String())
-				return s.Serve(l)
-			})
-
-			eg.Go(func() error {
-
 				ticker := time.NewTicker(c.Duration("prune-frequency"))
 
 				for {
@@ -171,4 +154,34 @@ func main() {
 		},
 	}
 	app.RunAndExitOnError()
+}
+
+func runHttp(ctx context.Context, log logr.Logger, addr, name string, handler http.Handler) func() error {
+
+	return func() error {
+		l, err := net.Listen("tcp", addr)
+		if err != nil {
+			return fmt.Errorf("could not listen for %s requests: %w", name, err)
+
+		}
+
+		s := &http.Server{
+			Handler: handler,
+		}
+
+		go func() {
+			<-ctx.Done()
+			shutdownContext, cancel := context.WithTimeout(context.Background(), time.Second)
+			defer cancel()
+			log.Info(fmt.Sprintf("graceful shutdown of the %s server", name))
+			err := s.Shutdown(shutdownContext)
+			if errors.Is(err, context.DeadlineExceeded) {
+				log.Info(fmt.Sprintf("%s server did not shut down gracefully, forcing close", name))
+				s.Close()
+			}
+		}()
+
+		log.Info(fmt.Sprintf("%s server started", name), "addr", l.Addr().String())
+		return s.Serve(l)
+	}
 }

@@ -8,11 +8,16 @@ import (
 	"github.com/gofrs/uuid"
 )
 
-func (s Server) Prune(cutoffTime time.Time) error {
-	return bolted.SugaredWrite(s.db, func(tx bolted.SugaredWriteTx) error {
+func (s Server) Prune(cutoffTime time.Time) (err error) {
+	return bolted.SugaredWrite(s.db, func(tx bolted.SugaredWriteTx) (err error) {
+		toDelete := []string{}
+		defer func() {
+			if err == nil {
+				s.log.Info("pruned state events", "count", len(toDelete))
+			}
+		}()
 		it := tx.Iterator(eventsPath)
 		it.Last()
-		toDelete := []string{}
 		for ; !it.IsDone(); it.Prev() {
 			id, err := uuid.FromString(it.GetKey())
 			if err != nil {
