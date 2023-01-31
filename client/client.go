@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -84,7 +85,25 @@ func (e *event) UnmarshalJSON(p []byte) error {
 	return nil
 }
 
+var errTimeout = errors.New("timeout")
+
 func (c *Client) PollForEvents(ctx context.Context, lastID string, limit int, evts any) ([]string, error) {
+	for {
+		ids, err := c.pollForEvents(ctx, lastID, limit, evts)
+
+		if err == errTimeout {
+			continue
+		}
+
+		if err != nil {
+			return nil, err
+		}
+
+		return ids, nil
+	}
+}
+
+func (c *Client) pollForEvents(ctx context.Context, lastID string, limit int, evts any) ([]string, error) {
 	uc := *c.eventsURL
 
 	u := &uc
@@ -103,6 +122,10 @@ func (c *Client) PollForEvents(ctx context.Context, lastID string, limit int, ev
 	}
 
 	defer res.Body.Close()
+
+	if res.StatusCode == http.StatusRequestTimeout {
+		return nil, errTimeout
+	}
 
 	if res.StatusCode != http.StatusOK {
 		rd, _ := io.ReadAll(res.Body)
