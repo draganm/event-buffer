@@ -86,6 +86,18 @@ func New(log logr.Logger, db bolted.Database) (*Server, error) {
 
 		q := r.URL.Query()
 
+		sort := "asc"
+		sortStr := q.Get("sort")
+
+		if sortStr != "asc" && sortStr != "desc" {
+			http.Error(w, fmt.Errorf("invalid sort value: %s", sortStr).Error(), http.StatusBadRequest)
+			return
+		}
+
+		if sortStr == "desc" {
+			sort = sortStr
+		}
+
 		after := q.Get("after")
 
 		limit := 100
@@ -113,13 +125,6 @@ func New(log logr.Logger, db bolted.Database) (*Server, error) {
 
 		ctx, done := context.WithTimeout(r.Context(), timeout)
 		defer done()
-
-		sort := "asc"
-		sortStr := q.Get("sort")
-
-		if sortStr == "desc" {
-			sort = sortStr
-		}
 
 		for ctx.Err() == nil {
 
