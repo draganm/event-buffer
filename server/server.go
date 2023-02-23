@@ -114,6 +114,13 @@ func New(log logr.Logger, db bolted.Database) (*Server, error) {
 		ctx, done := context.WithTimeout(r.Context(), timeout)
 		defer done()
 
+		sort := "asc"
+		sortStr := q.Get("sort")
+
+		if sortStr != "" {
+			sort = sortStr
+		}
+
 		for ctx.Err() == nil {
 
 			select {
@@ -126,14 +133,20 @@ func New(log logr.Logger, db bolted.Database) (*Server, error) {
 				it := tx.Iterator(eventsPath)
 				if after != "" {
 					it.Seek(after)
-					if !it.IsDone() {
-						if it.GetKey() == after {
-							it.Next()
-						}
+					if sort == "asc" && !it.IsDone() && it.GetKey() == after {
+						it.Next()
+					} else if sort == "desc" && !it.IsDone() && it.GetKey() == after {
+						it.Prev()
 					}
 				}
-				for ; !it.IsDone() && len(events) < limit; it.Next() {
-					events = append(events, event{it.GetKey(), it.GetValue()})
+				if sort == "asc" {
+					for ; !it.IsDone() && len(events) < limit; it.Next() {
+						events = append(events, event{it.GetKey(), it.GetValue()})
+					}
+				} else {
+					for ; !it.IsDone() && len(events) < limit; it.Prev() {
+						events = append(events, event{it.GetKey(), it.GetValue()})
+					}
 				}
 				return nil
 			})
