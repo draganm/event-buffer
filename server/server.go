@@ -117,7 +117,7 @@ func New(log logr.Logger, db bolted.Database) (*Server, error) {
 		sort := "asc"
 		sortStr := q.Get("sort")
 
-		if sortStr != "" {
+		if sortStr == "desc" {
 			sort = sortStr
 		}
 
