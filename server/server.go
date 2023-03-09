@@ -89,7 +89,7 @@ func New(log logr.Logger, db bolted.Database) (*Server, error) {
 		sort := "asc"
 		sortStr := q.Get("sort")
 
-		if sortStr != "asc" && sortStr != "desc" {
+		if sortStr != "" && sortStr != "asc" && sortStr != "desc" {
 			http.Error(w, fmt.Errorf("invalid sort value: %s", sortStr).Error(), http.StatusBadRequest)
 			return
 		}
