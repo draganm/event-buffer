@@ -16,6 +16,11 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 )
 
+const (
+	sortDesc = "desc"
+	sortAsc  = "asc"
+)
+
 type Server struct {
 	db  bolted.Database
 	log logr.Logger
@@ -86,15 +91,15 @@ func New(log logr.Logger, db bolted.Database) (*Server, error) {
 
 		q := r.URL.Query()
 
-		sort := "asc"
+		sort := sortAsc
 		sortStr := q.Get("sort")
 
-		if sortStr != "" && sortStr != "asc" && sortStr != "desc" {
+		if sortStr != "" && sortStr != sortAsc && sortStr != sortDesc {
 			http.Error(w, fmt.Errorf("invalid sort value: %s", sortStr).Error(), http.StatusBadRequest)
 			return
 		}
 
-		if sortStr == "desc" {
+		if sortStr == sortDesc {
 			sort = sortStr
 		}
 
@@ -138,17 +143,18 @@ func New(log logr.Logger, db bolted.Database) (*Server, error) {
 				it := tx.Iterator(eventsPath)
 				if after != "" {
 					it.Seek(after)
-					if sort == "asc" && !it.IsDone() && it.GetKey() == after {
+					if sort == sortAsc && !it.IsDone() && it.GetKey() == after {
 						it.Next()
 					} else if sort == "desc" && !it.IsDone() && it.GetKey() == after {
 						it.Prev()
 					}
 				}
-				if sort == "asc" {
+				switch sort {
+				case sortAsc:
 					for ; !it.IsDone() && len(events) < limit; it.Next() {
 						events = append(events, event{it.GetKey(), it.GetValue()})
 					}
-				} else {
+				case sortDesc:
 					for ; !it.IsDone() && len(events) < limit; it.Prev() {
 						events = append(events, event{it.GetKey(), it.GetValue()})
 					}
