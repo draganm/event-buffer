@@ -15,9 +15,10 @@ type eventsOrError struct {
 
 type State struct {
 	// serverBaseURL    string
-	client           *client.Client
-	pollResult       []string
-	secondPollResult []string
-	longPollResult   chan eventsOrError
-	lastId           string
+	client             *client.Client
+	pollResult         []string
+	secondPollResult   []string
+	longPollResult     chan eventsOrError
+	longPollResultDesc chan eventsOrError
+	lastId             string
 }

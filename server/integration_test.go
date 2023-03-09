@@ -17,6 +17,11 @@ import (
 	"go.uber.org/zap"
 )
 
+const (
+	sortDesc = "desc"
+	sortAsc  = "asc"
+)
+
 func init() {
 	logger, _ := zap.NewDevelopment()
 	if false {
@@ -91,6 +96,7 @@ func InitializeScenario(ctx *godog.ScenarioContext) {
 	ctx.Step(`^I should get a confirmation$`, iShouldGetAConfirmation)
 	ctx.Step(`^I poll for the events$`, iPollForTheEvents)
 	ctx.Step(`^I should receive the buffered event$`, iShouldReceiveTheBufferedEvent)
+	ctx.Step("^I should receive the buffered events in desc order$", iShouldReceiveDescTheNewEvent)
 	ctx.Step(`^one event in the buffer$`, oneEventInTheBuffer)
 	ctx.Step(`^I should receive the new event$`, iShouldReceiveTheNewEvent)
 	ctx.Step(`^I start polling for the events$`, iStartPollingForTheEvents)
@@ -133,7 +139,7 @@ func oneEventInTheBuffer(ctx context.Context) error {
 func iPollForTheEvents(ctx context.Context) error {
 	s := getState(ctx)
 	evts := []string{}
-	_, err := s.client.PollForEvents(ctx, "", 100, &evts)
+	_, err := s.client.PollForEvents(ctx, "", 100, sortAsc, &evts)
 	if err != nil {
 		return fmt.Errorf("failed polling for events: %w", err)
 	}
@@ -160,12 +166,23 @@ func iStartPollingForTheEvents(ctx context.Context) error {
 	s.longPollResult = make(chan eventsOrError, 1)
 	go func() {
 		evts := []string{}
-		_, err := s.client.PollForEvents(ctx, "", 100, &evts)
+		_, err := s.client.PollForEvents(ctx, "", 100, sortAsc, &evts)
 		if err != nil {
 			s.longPollResult <- eventsOrError{err: fmt.Errorf("failed polling for events: %w", err)}
 			return
 		}
 		s.longPollResult <- eventsOrError{events: evts}
+	}()
+
+	s.longPollResultDesc = make(chan eventsOrError, 1)
+	go func() {
+		evts := []string{}
+		_, err := s.client.PollForEvents(ctx, "", 100, sortDesc, &evts)
+		if err != nil {
+			s.longPollResult <- eventsOrError{err: fmt.Errorf("failed polling for events: %w", err)}
+			return
+		}
+		s.longPollResultDesc <- eventsOrError{events: evts}
 	}()
 
 	return nil
@@ -211,7 +228,7 @@ func twoEventsInTheBuffer(ctx context.Context) error {
 func iPollForOneEvent(ctx context.Context) error {
 	s := getState(ctx)
 	evts := []string{}
-	ids, err := s.client.PollForEvents(ctx, "", 1, &evts)
+	ids, err := s.client.PollForEvents(ctx, "", 1, sortAsc, &evts)
 	if err != nil {
 		return fmt.Errorf("failed polling for events: %w", err)
 	}
@@ -228,7 +245,7 @@ func iPollForOneEvent(ctx context.Context) error {
 func iPollForOtherEventAfterThePreviousEvent(ctx context.Context) error {
 	s := getState(ctx)
 	evts := []string{}
-	_, err := s.client.PollForEvents(ctx, s.lastId, 1, &evts)
+	_, err := s.client.PollForEvents(ctx, s.lastId, 1, sortAsc, &evts)
 	if err != nil {
 		return fmt.Errorf("failed polling for events: %w", err)
 	}
@@ -246,5 +263,24 @@ func iShouldGetOneEventForEachPoll(ctx context.Context) error {
 	if d != "" {
 		return fmt.Errorf("unexpected second poll result:\n%s", d)
 	}
+	return nil
+}
+
+func iShouldReceiveDescTheNewEvent(ctx context.Context) error {
+	s := getState(ctx)
+	select {
+	case <-ctx.Done():
+		return fmt.Errorf("could not get long poll event: %w", ctx.Err())
+	case res := <-s.longPollResultDesc:
+		if res.err != nil {
+			return fmt.Errorf("long poll failed: %w", res.err)
+		}
+		d := cmp.Diff(res.events, []string{"evt1"})
+
+		if d != "" {
+			return fmt.Errorf("unexpected poll result:\n%s", d)
+		}
+	}
+
 	return nil
 }
