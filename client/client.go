@@ -87,9 +87,9 @@ func (e *event) UnmarshalJSON(p []byte) error {
 
 var errTimeout = errors.New("timeout")
 
-func (c *Client) PollForEvents(ctx context.Context, lastID string, limit int, evts any) ([]string, error) {
+func (c *Client) PollForEvents(ctx context.Context, lastID string, limit int, sort string, evts any) ([]string, error) {
 	for {
-		ids, err := c.pollForEvents(ctx, lastID, limit, evts)
+		ids, err := c.pollForEvents(ctx, lastID, limit, sort, evts)
 
 		if err == errTimeout {
 			continue
@@ -103,7 +103,7 @@ func (c *Client) PollForEvents(ctx context.Context, lastID string, limit int, ev
 	}
 }
 
-func (c *Client) pollForEvents(ctx context.Context, lastID string, limit int, evts any) ([]string, error) {
+func (c *Client) pollForEvents(ctx context.Context, lastID string, limit int, sort string, evts any) ([]string, error) {
 	uc := *c.eventsURL
 
 	u := &uc
